@@ -1,137 +1,161 @@
-# Contributing to Agent Skills
+# Contributing to Graphify
 
-Thanks for your interest in contributing! This project is a collection of production-grade engineering skills for AI coding agents.
+Graphify is a graph-building system whose correctness depends on preserving provenance, deterministic extraction, and safe incremental updates. A contribution is not complete because the new code works on the happy path; it is complete when the relevant invariant is explicit, tested, and preserved across rebuilds.
 
-New here? [docs/developer-onboarding.md](docs/developer-onboarding.md) is a guided tour of how the repo fits together (the five layers, the verification loop, and the contribution paths) and tells you when to read this document, [skill-anatomy.md](docs/skill-anatomy.md), and [evals/README.md](evals/README.md). This file is the authoritative rulebook; the onboarding guide is the map.
+## Before You Start
+- Read [ARCHITECTURE.md](ARCHITECTURE.md)
+- Read [SECURITY.md](SECURITY.md) when relevant
+- Understand `v8` is the active development branch
+- Use `graphify-out/GRAPH_REPORT.md` for repository orientation
 
-## Adding a New Skill
+## What We Value
 
-### Before proposing a new skill
+1. **Preserve correctness, not merely successful execution**. A failed, partial, smaller, or differently keyed extraction must not overwrite valid persisted state or poison incremental caches.
+2. **Preserve provenance; incidental richness is not evidence**. A real source-backed record must not lose to a richer sourceless stub. A location without a corresponding source file is not sufficient provenance.
+3. **Keep deterministic extraction deterministic**. AST extraction, symbol identity, traversal order, merge behavior, and other structural passes must not depend on filesystem ordering, ambient environment state, network calls, or nondeterministic model output.
+4. **Keep inference visibly separate from extracted fact**. Never turn uncertainty into false certainty just because a richer result looks better. Preserve the distinction between extracted fact, inference, and ambiguity.
+5. **Prefer fail-closed behavior over guessed relationships**.
+6. **Treat persistent graph/cache state as data that can be corrupted**.
+7. **Make bug fixes prove the old failure with a regression test**. Demonstrate the old failure, not merely exercise the new code.
+8. **Keep PRs narrow and reviewable**. Small, auditable diffs beat clever broad fixes.
+9. **Document heuristic boundaries and unsupported cases**.
+10. **Never hand-edit generated artifacts**. Edit the source fragment, run the generator, and run the corresponding verification checks.
+11. **Do not let ambient environment state affect tests**. Tests must be deterministic with respect to the contributor's shell environment.
+12. **Treat paths, source text, model output, URLs, and generated commands as untrusted**. Never construct shell commands or Python source by interpolating free text.
+13. **Check cross-platform behavior when touching filesystem/process/install logic**. A change is not considered cross-platform-safe merely because it passes on Linux.
+14. **Update documentation when behavior or invariants change**. Documentation is part of the behavior contract.
+15. **Use Graphify itself to understand Graphify**, except when the graph is the thing being debugged. 
 
-This pack already covers most of the development lifecycle, and many proposals overlap with an existing skill or another open PR. Before opening one, do these checks so reviewers aren't triaging duplicates:
+## Repository Architecture
+- **Pipeline**: `detect()` → `extract()` → `build()` → `cluster()` → `analyze()` → `report.generate()` → `export.to_*()`
+- **Where extractors live**: `graphify/extractors/`
+- **Generated skills vs source fragments**: Skill files in `graphify/` are generated from fragments in `tools/skillgen/`. 
+- **What is generated and what is authoritative**: `tools/skillgen/fragments/` is authoritative.
 
-1. **Search the catalog.** Browse [the skill list in the README](README.md) and skim `skills/` for an existing skill that covers your idea, whole or in part.
-2. **Check open PRs.** Run `gh pr list --state open` (or browse the PRs tab) and look for proposals on the same topic. Clusters of near-duplicate skills already exist; don't add to them.
-3. **Check rejected proposals.** Search the [skill-change rejection ledger](evals/skill-impact.md) for earlier proposals that overlap with your idea and review their eval evidence before repeating the work.
-4. **Read the anatomy.** Confirm your idea fits the format in [docs/skill-anatomy.md](docs/skill-anatomy.md), an actionable workflow with verification, not vague advice.
-5. **Justify the gap in your PR description.** State explicitly why this isn't covered by an existing skill, open PR, or previously rejected proposal. If it overlaps, propose extending the existing skill instead of adding a new one.
-6. **Strip model-specific workarounds.** If a step can't be justified without naming a model, a model version, or one agent's private tool name, it doesn't belong in a skill — describe the capability instead (see [Write the Procedure, Not the Workaround](docs/skill-anatomy.md#write-the-procedure-not-the-workaround)).
-
-If your idea is a refinement of an existing skill, prefer a focused edit to that skill over a new directory.
-
-### Creating the skill
-
-1. Create a directory under `skills/` with a kebab-case name
-2. Add a `SKILL.md` following the format in [docs/skill-anatomy.md](docs/skill-anatomy.md)
-3. Include YAML frontmatter with `name` and `description` fields, and no vendor or runtime keys at the top level (those go under `metadata` or in a per-agent adapter file; see [docs/advanced-per-agent-configuration.md](docs/advanced-per-agent-configuration.md))
-4. Ensure the `description` starts with what the skill does (third person), then includes one or more `Use when` trigger conditions
-
-### Skill Quality Bar
-
-Skills should be:
-
-- **Specific** — Actionable steps, not vague advice
-- **Verifiable** — Clear exit criteria with evidence requirements
-- **Battle-tested** — Based on real engineering workflows, not theoretical ideals
-- **Minimal** — Only the content needed to guide the agent correctly
-
-### Structure
-
-Every new skill must have:
-
-- `SKILL.md` in the skill directory
-- YAML frontmatter with valid `name` and `description`
-- An eval case file at `evals/cases/<skill-name>.json` — at least 3 positive triggers, 2 negative triggers (with `owner` where possible), and 1 behavioral eval. Execution evals must be backed by real files under `evals/fixtures/`; conversation-shaped skills may use a reviewer-gated `kind: "dialogue"` eval instead (see [evals/README.md](evals/README.md)). CI enforces these requirements.
-
-New skills should generally follow the standard anatomy:
-
-- **Overview** — What this skill does and why it matters
-- **When to Use** — Triggering conditions
-- **Process** — Step-by-step workflow
-- **Common Rationalizations** — Excuses agents use to skip steps, with rebuttals
-- **Red Flags** — Warning signs that the skill is being applied incorrectly
-- **Verification** — How to confirm the skill was applied correctly
-
-The frontmatter fields above are required. The section anatomy is a recommended pattern: equivalent headings such as `How It Works`, `Workflow`, or `Core Process` are fine when they preserve the same intent and keep the skill easy to follow.
-
-### What Not to Do
-
-- Don't duplicate content between skills — reference other skills instead
-- Don't add skills that are vague advice instead of actionable processes
-- Don't create supporting files unless content exceeds 100 lines
-- Don't create an empty `scripts/` directory just to match another skill — add `scripts/` only when the skill includes runnable helpers
-- Don't put reference material inside skill directories — use `references/` instead
-
-## Modifying Existing Skills
-
-Before proposing a change, search the [skill-change rejection ledger](evals/skill-impact.md) for previous attempts affecting the same skill and review their eval evidence.
-
-- Keep changes focused and minimal
-- Preserve the existing structure and tone
-- Test that YAML frontmatter remains valid after edits
-
-If a skill or description change is rejected based on eval results, add one row to the ledger with the date, affected skill, concise attempted change, before-to-after rank-1 score, and rejected PR link and outcome. Land that ledger-only update separately on the default branch; do not leave it only on the rejected proposal branch, where closing or force-pushing the proposal could discard the record.
-
-## Adding a Host Guide
-
-The README install section lists only hosts a maintainer has installed and run the current release on. Every other host gets one line in [docs/other-hosts.md](docs/other-hosts.md): the host name and its install command. No dedicated setup page, vendor links, logos, emoji, or screenshots.
-
-- If you work for the company behind the host, say so in the PR.
-- A host moves into the README once a maintainer has run it and is willing to keep its entry current.
-- Host guides are reviewed in the order they were opened.
-
-## Repo-scoped files
-
-`AGENTS.md` and `CLAUDE.md` at the repo root configure agents working on the [`addyosmani/agent-skills`](https://github.com/addyosmani/agent-skills) repository itself. When writing setup guides or docs, do not instruct users to copy these files into their own projects or into a global agent configuration; the reusable assets are the skills in `skills/`.
-
-## Translations
-
-We don't accept translations of the documentation (README, `docs/`) or of skills and their content. Translated copies drift out of sync as skills and docs evolve, and we have no way to maintain them long-term without leaning on agent translations plus community corrections, which adds maintenance cost for limited value. Keep all skills, docs, and contributions in English.
-
-## Testing Hooks
-
-The session-start script (`hooks/session-start.sh`) injects the `using-agent-skills` meta-skill when wired into a host's `SessionStart` hook. The Claude Code plugin does not register it — Claude Code routes skills natively, and always-on injection would create two routers for the same task (see [docs/getting-started.md](docs/getting-started.md)); the script remains for hosts without native skill routing. A regression test at `hooks/session-start-test.sh` validates the script's JSON payload — both when `jq` is available and when it isn't.
-
-Run it before opening any PR that touches:
-
-- `hooks/session-start.sh`
-- `skills/using-agent-skills/SKILL.md` (the meta-skill content embedded by the hook)
+## Development Setup
 
 ```bash
-bash hooks/session-start-test.sh
+# Fork and clone the repository
+git clone https://github.com/<your-username>/graphify.git
+cd graphify
+git remote add upstream https://github.com/Graphify-Labs/graphify.git
+git fetch upstream
+git checkout -b my-feature-branch upstream/v8  # Always branch off upstream v8, never commit directly to v8
+
+# Set up the environment (--all-extras installs the optional grammars and SDKs,
+# matching CI; without it the tests that need them are skipped)
+uv sync --all-extras
+uv run pre-commit install
+
+# Run the test suite to confirm your setup
+uv run pytest tests/ -q
+
+# Run linters and type checkers before pushing
+uv run ruff check .
+uv run pyright
 ```
 
-Expected output: `session-start JSON payload OK`. The script exits non-zero on any assertion failure.
+- **Python versions**: 3.11+
+- **uv**: We use `uv` for dependency management.
 
-### Reproducing the no-jq fallback
+## Working on the Codebase
+- **Use graphify itself**: Before making non-trivial architectural changes, use `graphify query ...` to navigate the codebase rather than blind grepping. Do not use the graph as evidence when the task concerns the graph's own correctness.
+- **Update graph after code changes**: `graphify update .`
+- **Root/path invariants**: Paths resolve relative to the calling module or scan root.
+- **Cache considerations**: Be aware of relative/absolute path caching across rebuilds.
+- **Generated skill files**: Regenerate with `uv run python -m tools.skillgen --bless`. Never hand-edit the generated files directly.
+- **Corpus boundaries**: Do not create a second interpretation of the corpus boundary. Reuse the existing detection/ignore semantics whenever another pass walks project files (e.g. `.graphifyignore`).
+- **Cross-platform**: Windows portability is a first-class contribution concern. Path separators, symlinks, absolute/relative paths, hash seeds, and shell interpolation must work correctly on Windows.
 
-The hook still emits the same `hookSpecificOutput` envelope when `jq` isn't on `PATH`, with `additionalContext` explaining that `jq` is required. To exercise that branch locally, strip `jq`'s directory from `PATH` for the test invocation:
+## Making a Change
+1. Find or create an issue
+2. Reproduce
+3. Identify invariant
+4. Make smallest fix
+5. Add regression test
+6. Run targeted tests
+7. Run full suite (`uv run pytest tests`)
+8. Run lint/type checks (`uv run ruff check .`, `uv run pyright`)
+9. Regenerate artifacts if you touched their sources (`uv run python -m tools.skillgen --bless`).
 
-```bash
-JQ_DIR=$(dirname "$(command -v jq)")
-PATH=$(echo "$PATH" | tr ':' '\n' | grep -v "^${JQ_DIR}$" | tr '\n' ':' | sed 's/:$//') \
-  bash hooks/session-start-test.sh
-```
+## Tests
+- **pytest**: The primary test runner.
+- **Fixture conventions**: New language extractors need fixtures under `tests/fixtures/` and tests in `tests/test_languages.py`.
+- **Environment isolation**: Tests must not accidentally depend on the contributor's ambient environment. When writing backend/provider tests, explicitly isolate or clear environment variables (e.g., `OPENAI_API_KEY`, `OLLAMA_HOST`).
+- **Deterministic tests**: Ensure tests don't rely on ambient state or ordering.
+- **Regression-test expectations**: Test must fail on pre-fix and pass on post-fix.
 
-This works cleanly when `jq` lives in its own directory (e.g. `/opt/homebrew/bin` from Homebrew, `/usr/local/bin` from a manual install). If your `jq` shares a system bin with other tools the test depends on (such as `mktemp` in `/usr/bin`), the simpler approach is to install `jq` via a separate package manager so it has its own bin directory, then re-run.
+## Language Extractors
+- **Extractor module**: Defines logic for each language AST.
+- **Dispatch table**: Registers the parser and language.
+- **Tree-sitter dependency**: Use ASTs where possible.
+- **Fixture**: Ensure comprehensive test cases in `tests/fixtures/`.
+- **Cross-file resolution considerations**: Resolution stays local to AST paths.
 
-The hook's `command -v jq` check fails under the stripped `PATH`, the jq-missing fallback runs, and the test asserts the `jq is required` guidance in `additionalContext` instead of the meta-skill body.
+## Generated Skills and Monoliths
+- Source fragments are authoritative.
+- Run skillgen (`uv run python -m tools.skillgen --bless`).
+- Never casually edit generated artifacts.
+- Sanctioned round-trip changes only.
+- Preserve multiset checks.
 
-## Reporting Issues
+## Data Integrity Rules
+- **Zero-node guard**: Must run before writes.
+- **Shrink guard**: Must not persist smaller corrupt graphs. (Note: forced writes can bypass this).
+- `to_json` before report side effects.
+- **Cache consistency**: Must be maintained across absolute/relative paths. (e.g., The Windows absolute-path issue taught us that earlier side effects that persist bad absolute-path entries into the semantic cache are still data loss, even if the final graph write passes the shrink guard).
+- **Provenance**: Must be preserved.
+- **Cross-file edges**: Must be preserved during incremental updates, even if node count is unchanged.
 
-Open an issue if you find:
+## Security
+- Review [SECURITY.md](SECURITY.md).
+- Any change touching generated skill instructions, shell commands, subprocesses, URL ingestion, path handling, prompts, or serialization must be reviewed as a security-sensitive change.
+- Never interpolate untrusted content into shell/Python.
 
-- A skill that gives incorrect or outdated guidance
-- Missing coverage for a common engineering workflow
-- Inconsistencies between skills
+## Commit Messages
+Use a conventional-commit prefix (e.g., `fix:`, `feat:`, `docs:`, `fix(extract):`) and make the subject describe the change. Explain why in the body when the change is non-trivial. Reference the relevant issue/PR.
+- **AI Authorship Disclosure**: If an AI coding assistant materially contributed to the implementation, disclose it in the commit metadata according to the repository's authorship convention (e.g., `Co-Authored-By: Claude <noreply@anthropic.com>`). Do not attribute code to a model that did not contribute.
 
-If a skill's guidance was wrong, outdated, or did not apply in your project
-(for example, it assumed `npm test` in a Maven or Gradle repo), use the
-[Skill gap](https://github.com/addyosmani/agent-skills/issues/new?template=skill-gap.yml)
-issue form. It asks for the affected skill, the relevant excerpt, your project
-context, and what you did instead — enough for maintainers to triage without a
-freeform write-up.
+## Pull Requests
+- One concern per PR.
+- No unrelated changes.
+- Describe problem / implementation / verification.
+- List commands actually run.
+- Document limitations / unsupported cases.
+- Keep description synchronized with final implementation.
+- Rebase/resolve conflicts before requesting final review.
 
-## License
+## Working with AI Coding Agents
+AI assistants are welcome, but every rule in this guide applies to the code they write, and you remain the author of the PR.
+- Point your agent at this file and [ARCHITECTURE.md](ARCHITECTURE.md) before it changes anything.
+- Branch off `upstream/v8`, keep the PR to one concern, and never let an agent hand-edit generated skill files.
+- For bug fixes, confirm the regression test fails without the fix, not only that it passes with it.
+- Run the checks yourself before opening the PR: `uv run pytest tests`, `uv run ruff check .`, `uv run pyright`.
+- Disclose material AI help with a `Co-Authored-By:` trailer, as described under [Commit Messages](#commit-messages).
+- Write the PR description yourself, and list the commands you actually ran.
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+## Issue Reports
+### Bugs
+Include exact version/commit, environment, minimal reproduction, expected vs actual, logs, graph/cache artifacts where relevant, and whether a clean checkout reproduced it.
+
+### Feature Requests
+Focus on the problem first, proposed behavior, alternatives, and compatibility considerations.
+
+## Review Expectations
+- Correctness, regression coverage, scope, determinism, provenance, security, and documentation.
+
+## Release / Generated Artifacts
+- **What gets regenerated**: Skill files via skillgen, HTML exports.
+- **What should not be committed**: Local cache (`.graphify_cached.json`), generated node artifacts outside of the expected outputs.
+
+## Getting Help
+- **Discord**: Join the [Graphify Discord](https://discord.gg/graphify) for questions and discussion.
+- **Issues**: Search [existing issues](https://github.com/Graphify-Labs/graphify/issues) before opening a new one.
+- **Discussions**: Use GitHub issues for bugs and feature requests, Discord for open-ended questions.
+
+## Further Reading
+- [README.md](README.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [SECURITY.md](SECURITY.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [RELEASING.md](RELEASING.md) (maintainers)
