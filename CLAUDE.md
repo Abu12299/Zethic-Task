@@ -1,60 +1,71 @@
-# agent-skills
+# CLAUDE.md
 
-This is the agent-skills project — a collection of production-grade engineering skills for AI coding agents.
+@AGENTS.md
 
-> **Scope:** This file configures agents working on the [`addyosmani/agent-skills`](https://github.com/addyosmani/agent-skills) repository itself, not other projects. Don't copy it into another project or a global agent configuration; the reusable assets are the skills in `skills/`.
+**All project rules live in [`AGENTS.md`](AGENTS.md)** — the single source of truth for every AI
+assistant (architecture, conventions, testing, quality gates, git workflow, the 23 Hard Rules,
+PII learnings). Read it in full; do not re-add project rules here. Everything below applies ONLY
+to Claude Code — operational refinements of rules already defined in `AGENTS.md`.
 
-## Project Structure
+## Worktree isolation — Claude Code specifics
 
-```
-skills/       → Core skills (SKILL.md per directory)
-agents/       → Reusable agent personas (code-reviewer, test-engineer, security-auditor, web-performance-auditor, accessibility-auditor)
-hooks/        → Session lifecycle hooks
-.claude/commands/ → Slash commands (/spec, /plan, /build, /test, /review, /code-simplify, /ship; plus the /webperf and /a11y specialist audits)
-references/   → Supplementary checklists (testing, performance, security, accessibility, observability)
-evals/        → Skill eval cases + framework (see evals/README.md)
-docs/         → Setup guides for different tools
-```
+The full mandatory worktree protocol (base-branch confirmation, `.claude/worktrees/` canonical
+path, `cp -al` node_modules, teardown rules) is in
+[`docs/ops/WORKTREE_ISOLATION.md`](docs/ops/WORKTREE_ISOLATION.md) (summarized in `AGENTS.md` →
+Git Workflow → "Worktree isolation"). Claude-Code-specific points:
 
-## Skills by Phase
+- Confirm the base branch with the operator via `AskUserQuestion` (Hard Rule #19) unless they
+  already told you.
+- Prefer the native `EnterWorktree` tool — it already creates worktrees under
+  `.claude/worktrees/` (the canonical path). Create the worktree with the documented `git
+worktree add` command, then call `EnterWorktree` with its `path`.
 
-**Define:** interview-me, idea-refine, spec-driven-development
-**Plan:** planning-and-task-breakdown
-**Build:** incremental-implementation, test-driven-development, context-engineering, source-driven-development, doubt-driven-development, frontend-ui-engineering, api-and-interface-design
-**Verify:** browser-testing-with-devtools, debugging-and-error-recovery
-**Review:** code-review-and-quality, code-simplification, security-and-hardening, performance-optimization, accessibility-engineering
-**Ship:** git-workflow-and-versioning, ci-cd-and-automation, deprecation-and-migration, documentation-and-adrs, observability-and-instrumentation, shipping-and-launch
+## Cross-session safety — Claude Code specifics
 
-## Conventions
+Hard Rules #19/#21/#22 (in `AGENTS.md`) govern parallel sessions. Operational reminders for this
+harness:
 
-- Every skill lives in `skills/<name>/SKILL.md`
-- YAML frontmatter with `name` and `description` fields
-- Description starts with what the skill does (third person), followed by trigger conditions ("Use when...")
-- Every skill has: Overview, When to Use, Process, Common Rationalizations, Red Flags, Verification
-- Shared references are in the root `references/` directory; the emerging convention for self-contained, distributable skills keeps a skill's own references inside `skills/<name>/references/`
-- Supporting files only created when content exceeds 100 lines
+- **Replicate the `git stash` ban verbatim in the prompt of every subagent that touches git**
+  (Agent tool / Workflow scripts) — subagents do not inherit this file, and the recorded
+  recurrence of the stash incident came through a subagent.
+- Before merging or pushing to any PR you did not create _this session_, run `git worktree list`
+  and re-check `gh pr view <N> --json state,headRefOid` (Hard Rule #22b).
+- End every session with the main checkout on the branch it started on.
 
-## Contributing
+## Superpowers / planning artifacts — path overrides
 
-Before adding a new skill or significantly reworking an existing one, run the pre-flight checks in [CONTRIBUTING.md](CONTRIBUTING.md#before-proposing-a-new-skill): search the catalog, check open PRs, confirm the idea fits [docs/skill-anatomy.md](docs/skill-anatomy.md), and justify the gap. Prefer extending an existing skill over adding a near-duplicate. CONTRIBUTING.md is the single source of truth for this workflow; do not restate its checklist here or elsewhere, link to it.
+The `_tasks/` convention is defined in `AGENTS.md` → "Planning & Research Artifacts". The
+superpowers skills ship with defaults that point at `docs/…` — those defaults are **overridden
+here**. When a superpowers skill announces a path like "saved to `docs/superpowers/plans/…`",
+rewrite it to the `_tasks/…` equivalent before writing:
 
-## Commands
+| Artifact (skill)                   | Default (do NOT use)      | Save here instead                                             |
+| ---------------------------------- | ------------------------- | ------------------------------------------------------------- |
+| Plans (`writing-plans`)            | `docs/superpowers/plans/` | `_tasks/superpowers/plans/YYYY-MM-DD-<feature>.md`            |
+| Specs / design (`brainstorming`)   | `docs/superpowers/specs/` | `_tasks/superpowers/specs/YYYY-MM-DD-<topic>-design.md`       |
+| Research (`deep-research`, ad-hoc) | `docs/research/`          | `_tasks/research/…`                                           |
+| Hand-offs (`/handoff`)             | —                         | `_tasks/hands-off/<YYYY-MM-DD>_<branch>_v<versão>_sess-<id>/` |
 
-- `npm test` — Not applicable (this is a documentation project)
-- Validate: Check that all SKILL.md files have valid YAML frontmatter with name and description
-- Evals: `node scripts/run-evals.js` — trigger/routing evals for every skill (CI); `--behavioral <skill>` for graded runs
+Commit those artifacts inside the `_tasks/` repo (`git -C _tasks …`), never in the main repo.
 
-## Pull Requests
+## Scratch / temporary files — use `_artifacts/`, not `/tmp`
 
-PRs target the upstream repository's default branch. In a typical fork setup the upstream remote is `upstream` and your fork is `origin`, but the exact remote names are not what matters here.
+This project overrides the harness's default session scratchpad (`/tmp/claude-*/…`). Write
+temporary/working files — exports, generated zips, one-off intermediate outputs, anything you'd
+otherwise put in `/tmp` — to `/home/diegosouzapw/dev/proxys/OmniRoute/_artifacts/` instead.
 
-- Before opening a PR, search the upstream repository's open PRs and issues for work that touches the same files or rules. If any overlaps, coordinate (build on it, align your rules with it, or rebase after it merges) instead of opening a conflicting PR.
-- Prefer small, focused PRs over large refactors of widely shared files (for example, files under `scripts/`), which are more likely to collide with in-flight work.
+- `_artifacts/` is a root `_*` path: already gitignored (`AGENTS.md` → "Root `_*` paths"), lives
+  on disk only, never tracked.
+- Reason: keeping scratch output inside the project (vs `/tmp`) makes it trivial for the operator
+  to find and delete everything temporary in one place, instead of hunting across ephemeral
+  session-specific `/tmp` directories that vanish or accumulate untracked.
+- Do **not** confuse this with `_tasks/` (Hard Rule #23, its own private git repo for durable
+  plans/specs/research/hand-offs) — `_artifacts/` is for disposable working files only, nothing
+  here needs to survive or be versioned.
 
-## Boundaries
+## Base-green before opening PRs
 
-- Always: Run the CONTRIBUTING.md pre-flight checks before creating a new skill directory
-- Always: Follow the skill-anatomy.md format for new skills
-- Always: Check the upstream repo's open PRs and issues for overlap before opening a new PR
-- Never: Add skills that are vague advice instead of actionable processes
-- Never: Duplicate content between skills — reference other skills instead
+Before cutting a branch or opening a PR, run the base-green check (`AGENTS.md` → Git Workflow →
+"Base-green check"; project skills reference it as `.agents/skills/_shared/base-green.md`). A PR
+opened while the base tip is red must carry `⚠️ base-red inherited: #<issue>` in its body. To
+drain an accumulated red state (base tip + red PRs), use the `/sweep-reds` skill.

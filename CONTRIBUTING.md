@@ -1,161 +1,439 @@
-# Contributing to Graphify
+# Contributing to OmniRoute
 
-Graphify is a graph-building system whose correctness depends on preserving provenance, deterministic extraction, and safe incremental updates. A contribution is not complete because the new code works on the happy path; it is complete when the relevant invariant is explicit, tested, and preserved across rebuilds.
+Thank you for your interest in contributing! This guide covers everything you need to get started.
 
-## Before You Start
-- Read [ARCHITECTURE.md](ARCHITECTURE.md)
-- Read [SECURITY.md](SECURITY.md) when relevant
-- Understand `v8` is the active development branch
-- Use `graphify-out/GRAPH_REPORT.md` for repository orientation
+For the official per-change workflow, start with the
+[Contribution Golden Path](docs/ops/CONTRIBUTION_GOLDEN_PATH.md). It maps provider, routing,
+UI/UX, i18n, CLI, database, and build/deploy changes to their contracts, focused tests, CI
+coverage, and reconciliation steps.
 
-## What We Value
-
-1. **Preserve correctness, not merely successful execution**. A failed, partial, smaller, or differently keyed extraction must not overwrite valid persisted state or poison incremental caches.
-2. **Preserve provenance; incidental richness is not evidence**. A real source-backed record must not lose to a richer sourceless stub. A location without a corresponding source file is not sufficient provenance.
-3. **Keep deterministic extraction deterministic**. AST extraction, symbol identity, traversal order, merge behavior, and other structural passes must not depend on filesystem ordering, ambient environment state, network calls, or nondeterministic model output.
-4. **Keep inference visibly separate from extracted fact**. Never turn uncertainty into false certainty just because a richer result looks better. Preserve the distinction between extracted fact, inference, and ambiguity.
-5. **Prefer fail-closed behavior over guessed relationships**.
-6. **Treat persistent graph/cache state as data that can be corrupted**.
-7. **Make bug fixes prove the old failure with a regression test**. Demonstrate the old failure, not merely exercise the new code.
-8. **Keep PRs narrow and reviewable**. Small, auditable diffs beat clever broad fixes.
-9. **Document heuristic boundaries and unsupported cases**.
-10. **Never hand-edit generated artifacts**. Edit the source fragment, run the generator, and run the corresponding verification checks.
-11. **Do not let ambient environment state affect tests**. Tests must be deterministic with respect to the contributor's shell environment.
-12. **Treat paths, source text, model output, URLs, and generated commands as untrusted**. Never construct shell commands or Python source by interpolating free text.
-13. **Check cross-platform behavior when touching filesystem/process/install logic**. A change is not considered cross-platform-safe merely because it passes on Linux.
-14. **Update documentation when behavior or invariants change**. Documentation is part of the behavior contract.
-15. **Use Graphify itself to understand Graphify**, except when the graph is the thing being debugged. 
-
-## Repository Architecture
-- **Pipeline**: `detect()` → `extract()` → `build()` → `cluster()` → `analyze()` → `report.generate()` → `export.to_*()`
-- **Where extractors live**: `graphify/extractors/`
-- **Generated skills vs source fragments**: Skill files in `graphify/` are generated from fragments in `tools/skillgen/`. 
-- **What is generated and what is authoritative**: `tools/skillgen/fragments/` is authoritative.
+---
 
 ## Development Setup
 
+### Prerequisites
+
+- **Node.js** `>=22.22.2 <23`, or `>=24.0.0 <27` (recommended: 24 LTS)
+- **npm** 10+
+
+> **Windows with Node 24:** use the current 24 LTS patch release (at least 24.20.0).
+> Earlier releases can abort after successful tests when `--test-force-exit` closes the
+> process. Node's [Windows libuv fix](https://github.com/nodejs/node/pull/61999) addresses
+> this runtime crash; keep the test assertions and runner exit checks enabled.
+
+> **npm v11+ users (Node 24+):** After `npm install`, verify native modules were installed:
+> `node -e "require('better-sqlite3')"`. If it fails with `MODULE_NOT_FOUND`,
+> run `npm approve-scripts better-sqlite3 && npm install`. See
+> [Troubleshooting](docs/guides/TROUBLESHOOTING.md#npm-v11-better-sqlite3-not-installed-cannot-find-module).
+
+- **Git**
+
+### Clone & Install
+
 ```bash
-# Fork and clone the repository
-git clone https://github.com/<your-username>/graphify.git
-cd graphify
-git remote add upstream https://github.com/Graphify-Labs/graphify.git
-git fetch upstream
-git checkout -b my-feature-branch upstream/v8  # Always branch off upstream v8, never commit directly to v8
-
-# Set up the environment (--all-extras installs the optional grammars and SDKs,
-# matching CI; without it the tests that need them are skipped)
-uv sync --all-extras
-uv run pre-commit install
-
-# Run the test suite to confirm your setup
-uv run pytest tests/ -q
-
-# Run linters and type checkers before pushing
-uv run ruff check .
-uv run pyright
+git clone https://github.com/diegosouzapw/OmniRoute.git
+cd OmniRoute
+npm install
 ```
 
-- **Python versions**: 3.11+
-- **uv**: We use `uv` for dependency management.
+### Environment Variables
 
-## Working on the Codebase
-- **Use graphify itself**: Before making non-trivial architectural changes, use `graphify query ...` to navigate the codebase rather than blind grepping. Do not use the graph as evidence when the task concerns the graph's own correctness.
-- **Update graph after code changes**: `graphify update .`
-- **Root/path invariants**: Paths resolve relative to the calling module or scan root.
-- **Cache considerations**: Be aware of relative/absolute path caching across rebuilds.
-- **Generated skill files**: Regenerate with `uv run python -m tools.skillgen --bless`. Never hand-edit the generated files directly.
-- **Corpus boundaries**: Do not create a second interpretation of the corpus boundary. Reuse the existing detection/ignore semantics whenever another pass walks project files (e.g. `.graphifyignore`).
-- **Cross-platform**: Windows portability is a first-class contribution concern. Path separators, symlinks, absolute/relative paths, hash seeds, and shell interpolation must work correctly on Windows.
+```bash
+# Create your .env from the template
+cp .env.example .env
 
-## Making a Change
-1. Find or create an issue
-2. Reproduce
-3. Identify invariant
-4. Make smallest fix
-5. Add regression test
-6. Run targeted tests
-7. Run full suite (`uv run pytest tests`)
-8. Run lint/type checks (`uv run ruff check .`, `uv run pyright`)
-9. Regenerate artifacts if you touched their sources (`uv run python -m tools.skillgen --bless`).
+# Generate required secrets
+echo "JWT_SECRET=$(openssl rand -base64 48)" >> .env
+echo "API_KEY_SECRET=$(openssl rand -hex 32)" >> .env
+```
 
-## Tests
-- **pytest**: The primary test runner.
-- **Fixture conventions**: New language extractors need fixtures under `tests/fixtures/` and tests in `tests/test_languages.py`.
-- **Environment isolation**: Tests must not accidentally depend on the contributor's ambient environment. When writing backend/provider tests, explicitly isolate or clear environment variables (e.g., `OPENAI_API_KEY`, `OLLAMA_HOST`).
-- **Deterministic tests**: Ensure tests don't rely on ambient state or ordering.
-- **Regression-test expectations**: Test must fail on pre-fix and pass on post-fix.
+Key variables for development:
 
-## Language Extractors
-- **Extractor module**: Defines logic for each language AST.
-- **Dispatch table**: Registers the parser and language.
-- **Tree-sitter dependency**: Use ASTs where possible.
-- **Fixture**: Ensure comprehensive test cases in `tests/fixtures/`.
-- **Cross-file resolution considerations**: Resolution stays local to AST paths.
+| Variable               | Development Default      | Description           |
+| ---------------------- | ------------------------ | --------------------- |
+| `PORT`                 | `20128`                  | Server port           |
+| `NEXT_PUBLIC_BASE_URL` | `http://localhost:20128` | Base URL for frontend |
+| `JWT_SECRET`           | (generate above)         | JWT signing secret    |
+| `INITIAL_PASSWORD`     | `CHANGEME`               | First login password  |
+| `APP_LOG_LEVEL`        | `info`                   | Log verbosity level   |
 
-## Generated Skills and Monoliths
-- Source fragments are authoritative.
-- Run skillgen (`uv run python -m tools.skillgen --bless`).
-- Never casually edit generated artifacts.
-- Sanctioned round-trip changes only.
-- Preserve multiset checks.
+### Dashboard Settings
 
-## Data Integrity Rules
-- **Zero-node guard**: Must run before writes.
-- **Shrink guard**: Must not persist smaller corrupt graphs. (Note: forced writes can bypass this).
-- `to_json` before report side effects.
-- **Cache consistency**: Must be maintained across absolute/relative paths. (e.g., The Windows absolute-path issue taught us that earlier side effects that persist bad absolute-path entries into the semantic cache are still data loss, even if the final graph write passes the shrink guard).
-- **Provenance**: Must be preserved.
-- **Cross-file edges**: Must be preserved during incremental updates, even if node count is unchanged.
+The dashboard provides UI toggles for features that can also be configured via environment variables:
 
-## Security
-- Review [SECURITY.md](SECURITY.md).
-- Any change touching generated skill instructions, shell commands, subprocesses, URL ingestion, path handling, prompts, or serialization must be reviewed as a security-sensitive change.
-- Never interpolate untrusted content into shell/Python.
+| Setting Location    | Toggle             | Description                    |
+| ------------------- | ------------------ | ------------------------------ |
+| Settings → Advanced | Debug Mode         | Enable debug request logs (UI) |
+| Settings → General  | Sidebar Visibility | Show/hide sidebar sections     |
 
-## Commit Messages
-Use a conventional-commit prefix (e.g., `fix:`, `feat:`, `docs:`, `fix(extract):`) and make the subject describe the change. Explain why in the body when the change is non-trivial. Reference the relevant issue/PR.
-- **AI Authorship Disclosure**: If an AI coding assistant materially contributed to the implementation, disclose it in the commit metadata according to the repository's authorship convention (e.g., `Co-Authored-By: Claude <noreply@anthropic.com>`). Do not attribute code to a model that did not contribute.
+These settings are stored in the database and persist across restarts, overriding env var defaults when set.
 
-## Pull Requests
-- One concern per PR.
-- No unrelated changes.
-- Describe problem / implementation / verification.
-- List commands actually run.
-- Document limitations / unsupported cases.
-- Keep description synchronized with final implementation.
-- Rebase/resolve conflicts before requesting final review.
+### Running Locally
 
-## Working with AI Coding Agents
-AI assistants are welcome, but every rule in this guide applies to the code they write, and you remain the author of the PR.
-- Point your agent at this file and [ARCHITECTURE.md](ARCHITECTURE.md) before it changes anything.
-- Branch off `upstream/v8`, keep the PR to one concern, and never let an agent hand-edit generated skill files.
-- For bug fixes, confirm the regression test fails without the fix, not only that it passes with it.
-- Run the checks yourself before opening the PR: `uv run pytest tests`, `uv run ruff check .`, `uv run pyright`.
-- Disclose material AI help with a `Co-Authored-By:` trailer, as described under [Commit Messages](#commit-messages).
-- Write the PR description yourself, and list the commands you actually ran.
+```bash
+# Development mode (hot reload)
+npm run dev
 
-## Issue Reports
-### Bugs
-Include exact version/commit, environment, minimal reproduction, expected vs actual, logs, graph/cache artifacts where relevant, and whether a clean checkout reproduced it.
+# Production build
+npm run build    # next build → .build/next/ then assembleStandalone → dist/
+npm run start
 
-### Feature Requests
-Focus on the problem first, proposed behavior, alternatives, and compatibility considerations.
+# Fast backend/API-only compile for contributor changes
+npm run build:contributor
 
-## Review Expectations
-- Correctness, regression coverage, scope, determinism, provenance, security, and documentation.
+# Release build (clean rebuild + HEAD sentinel — required for deploy)
+npm run build:release   # rm -rf .build dist && build + writes dist/BUILD_SHA
 
-## Release / Generated Artifacts
-- **What gets regenerated**: Skill files via skillgen, HTML exports.
-- **What should not be committed**: Local cache (`.graphify_cached.json`), generated node artifacts outside of the expected outputs.
+# Common port configuration
+PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
+```
+
+The contributor build performs compile-only validation: it does not assemble the standalone
+distribution or build optional native packaging assets. Use the regular production build when
+you need to validate the shippable bundle.
+
+### Build Output Layout
+
+| Directory | Contents                                                                  | Tracked |
+| --------- | ------------------------------------------------------------------------- | ------- |
+| `src/`    | Application source (TypeScript / TSX)                                     | Yes     |
+| `.build/` | Intermediates — `next build` output (gitignored, `distDir = .build/next`) | No      |
+| `dist/`   | Shippable bundle — assembled by `assembleStandalone` (gitignored)         | No      |
+
+The build pipeline is a single pass:
+
+```
+npm run build
+  └─ next build → .build/next/standalone  (Next.js output)
+  └─ assembleStandalone()                 (copies standalone + static + public + native assets)
+       └─ output: dist/                   (server.js, .next/static/, public/, node_modules/)
+```
+
+`npm run build:release` additionally cleans both directories first and writes
+`dist/BUILD_SHA` (= `git rev-parse --short HEAD`) as a deploy integrity sentinel.
+
+`npm run build:contributor` uses the backend-only build profile. It temporarily stubs
+dashboard UI files while building, keeps API route handlers, and restores the original files
+after the build. Use `npm run build` for changes that affect the dashboard UI or for full
+release validation; the contributor profile is not a replacement for the release build.
+
+> **VPS deploy note:** the remote image directory `/usr/lib/node_modules/omniroute/app/`
+> is unchanged. The deploy skills rsync the contents of `dist/` into it.
+> Only the in-repo build output path moved (`app/` → `dist/`).
+
+Default URLs:
+
+- **Dashboard**: `http://localhost:20128/dashboard`
+- **API**: `http://localhost:20128/v1`
+
+---
+
+## Git Workflow
+
+> ⚠️ **NEVER commit directly to `main`.** Always use feature branches.
+>
+> **PR base:** target the active `release/vX.Y.Z` branch (not `main`). See
+> [`docs/ops/BRANCHING_MODEL.md`](docs/ops/BRANCHING_MODEL.md) for the
+> release-per-branch + tag-at-ship model.
+
+```bash
+# Branch from the active release tip (example: release/v3.8.49)
+git fetch origin
+git checkout -b feat/your-feature-name origin/release/v3.8.49
+# ... make changes ...
+git commit -m "feat: describe your change"
+git push -u origin feat/your-feature-name
+# Open a Pull Request with base = release/v3.8.49
+```
+
+### Branch Naming
+
+| Prefix      | Purpose                   |
+| ----------- | ------------------------- |
+| `feat/`     | New features              |
+| `fix/`      | Bug fixes                 |
+| `refactor/` | Code restructuring        |
+| `docs/`     | Documentation changes     |
+| `test/`     | Test additions/fixes      |
+| `chore/`    | Tooling, CI, dependencies |
+
+### Commit Messages
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat: add circuit breaker for provider calls
+fix: resolve JWT secret validation edge case
+docs: update SECURITY.md with PII protection
+test: add observability unit tests
+refactor(db): consolidate rate limit tables
+```
+
+Scopes (v3.8): `db`, `sse`, `oauth`, `dashboard`, `api`, `cli`, `docker`, `ci`, `mcp`, `a2a`, `memory`, `skills`, `cloud-agent`, `guardrails`, `compression`, `auto-combo`, `resilience`, `providers`, `executors`, `translator`, `domain`, `authz`.
+
+---
+
+## Running Tests
+
+```bash
+# All tests (unit + vitest + ecosystem + e2e)
+npm run test:all
+
+# Single test file (Node.js native test runner — most tests use this)
+node --import tsx/esm --test tests/unit/your-file.test.ts
+
+# Only the unit tests impacted by your change (same TIA selector as the CI gate, #8084)
+npm run test:scoped            # changes in the last commit (or the working tree)
+npm run test:scoped:staged     # staged changes only — pairs well with a pre-commit run
+npm run test:scoped:full       # rebuild the import-graph map first (after adding/moving files)
+# Exit 1 + "run the full suite" means a hub file (tsconfig, package.json, …) or an
+# unmapped source changed — the selector fails safe, it never silently skips.
+
+# Vitest (MCP server, autoCombo, cache)
+npm run test:vitest
+
+# E2E tests (requires Playwright)
+npm run test:e2e
+
+# Protocol clients E2E (MCP transports, A2A)
+npm run test:protocols:e2e
+
+# Ecosystem compatibility tests
+npm run test:ecosystem
+
+# Coverage gate: 60% statements/lines/functions/branches
+npm run test:coverage
+npm run coverage:report
+
+# Lint + format check
+npm run lint
+npm run check
+
+# Gated real-upstream combo smoke (requires VPS access + real provider credits)
+# Hits REAL providers — costs a little. NEVER runs in CI. Skips cleanly without the gate.
+# Needs: ssh root@192.168.0.15 access (sources a read-only DB snapshot from the VPS).
+RUN_COMBO_LIVE=1 npm run test:combo:live
+
+# Phase-3 VPS live smoke — plain Node ESM scripts, hit the live .15 server directly.
+# Requires: ssh root@192.168.0.15 access (combos created/torn down via SSH sqlite).
+# Hits REAL providers (small cost). Creates/deletes only __live_test__* combos. NEVER runs in CI.
+# REQUIRE_API_KEY=false on .15 so no API key needed, but honors COMBO_LIVE_BASE_URL / COMBO_LIVE_API_KEY if set.
+npm run test:combo:live:vps              # 7 HTTP scenarios (priority/round-robin/weighted/cost/fusion/auto + health)
+npm run test:combo:live:vps:failover     # adds a real cross-provider failover scenario (8 total)
+```
+
+Coverage notes:
+
+- `npm run test:coverage` measures source coverage for the main unit test suite, excludes `tests/**`, and includes `open-sse/**`
+- Pull requests must keep the coverage gate at **60%+** statements/lines/functions/branches
+- If a PR changes production code in `src/`, `open-sse/`, `electron/`, or `bin/`, it must add or update automated tests in the same PR
+- `npm run coverage:report` prints the detailed file-by-file report from the latest coverage run
+- `npm run test:coverage:legacy` preserves the older metric for historical comparison
+- See `docs/ops/COVERAGE_PLAN.md` for the phased coverage improvement roadmap
+
+### Pull Request Requirements
+
+Before opening a PR, use the
+[Contribution Golden Path](docs/ops/CONTRIBUTION_GOLDEN_PATH.md) to run the focused loop for
+what you changed. The full unit suite (4 CI shards), Vitest, the **60%+** coverage gate, and
+the production build are CI's responsibility — running them locally adds no signal the PR
+checks will not already give you, and on smaller machines it can saturate the host (#8084):
+
+- Run the test files that cover your change: `node --import tsx/esm --test tests/unit/<file>.test.ts`
+- Run `npm run lint`
+- Include or update automated tests in the same PR whenever production code changes
+- In `node:test` files, put every top-level `await` (such as `await import(...)`) before the first `test()` / `describe()`: under `--test-force-exit`, tests registered after it can silently never run (#18045; enforced by `npm run check:test-tla-order`)
+- Include the changed or added test files in the PR description when production code changed
+- Check the SonarQube result on the PR when the project secrets are configured in CI
+
+Current test status: **122 unit test files** covering:
+
+- Provider translators and format conversion
+- Rate limiting, circuit breaker, and resilience
+- Semantic cache, idempotency, progress tracking
+- Database operations and schema (21 DB modules)
+- OAuth flows and authentication
+- API endpoint validation (Zod v4)
+- MCP server tools and scope enforcement
+- Memory and Skills systems
+
+---
+
+## Code Style
+
+- **ESLint** — Run `npm run lint` before committing
+- **Prettier** — Auto-formatted via `lint-staged` on commit (2 spaces, semicolons, double quotes, 100 char width, es5 trailing commas)
+- **TypeScript** — All `src/` code uses `.ts`/`.tsx`; `open-sse/` uses `.ts`/`.js`; document with TSDoc (`@param`, `@returns`, `@throws`)
+- **No `eval()`** — ESLint enforces `no-eval`, `no-implied-eval`, `no-new-func`
+- **Zod validation** — Use Zod v4 schemas for all API input validation
+- **Naming**: Files = camelCase/kebab-case, components = PascalCase, constants = UPPER_SNAKE
+
+### Error handling / empty catch blocks
+
+Never leave a `catch` unexplained. Classify it into one of two buckets (operationalizes
+the hard rule "never silently swallow errors in SSE streams"):
+
+- **Intentional (our own best-effort cleanup/telemetry)** — a failure here is expected and
+  harmless; add a one-line rationale comment, no logging (logging on every request is the
+  noise this convention avoids).
+
+  ```ts
+  } catch {} // closing an already-closed controller after client disconnect is expected
+  ```
+
+- **Should log (external/caller-supplied code, or the swallow changes control flow)** — keep
+  the catch (never let it break the stream) but emit a contextual `console.debug`/`warn` so the
+  failure is discoverable.
+
+  ```ts
+  } catch (e) {
+    console.debug("[STREAM] onFailure callback error:", e);
+  }
+  ```
+
+See `open-sse/utils/stream.ts` and `open-sse/utils/streamHandler.ts` for applied examples.
+
+---
+
+## Project Structure
+
+```
+src/                        # TypeScript (.ts / .tsx)
+├── app/                    # Next.js 16 App Router
+│   ├── (dashboard)/        # Dashboard pages (23 sections)
+│   ├── api/                # API routes (51 directories)
+│   └── login/              # Auth pages (.tsx)
+├── domain/                 # Policy engine (policyEngine, comboResolver, costRules, etc.)
+├── lib/                    # Core business logic (.ts)
+│   ├── a2a/                # Agent-to-Agent v0.3 protocol server
+│   ├── acp/                # Agent Communication Protocol registry
+│   ├── compliance/         # Compliance policy engine
+│   ├── db/                 # SQLite domain modules + 130 migrations
+│   ├── memory/             # Persistent conversational memory
+│   ├── oauth/              # OAuth providers, services, and utilities
+│   ├── skills/             # Extensible skill framework
+│   ├── usage/              # Usage tracking and cost calculation
+│   └── localDb.ts          # Re-export layer only — never add logic here
+├── middleware/              # Request middleware (promptInjectionGuard)
+├── mitm/                   # MITM proxy (cert, DNS, target routing)
+├── shared/
+│   ├── components/         # React components (.tsx)
+│   ├── constants/          # Provider definitions (329), MCP scopes, 22 routing strategies
+│   ├── utils/              # Circuit breaker, sanitizer, auth helpers
+│   └── validation/         # Zod v4 schemas
+└── sse/                    # SSE proxy pipeline
+
+open-sse/                   # @omniroute/open-sse workspace
+├── executors/              # 150 executor modules (executor classes + per-provider helpers)
+├── handlers/               # 11 request handlers (chat, responses, embeddings, images, etc.)
+├── mcp-server/             # MCP server (110 unique tools, 3 transports, 33 scopes)
+├── services/               # 178 top-level services (combo, autoCombo, rateLimitManager, etc.)
+├── translator/             # Format translators (OpenAI ↔ Claude ↔ Gemini ↔ Responses ↔ Ollama)
+├── transformer/            # Responses API transformer
+└── utils/                  # 22 utility modules (stream, TLS, proxy, logging)
+
+electron/                   # Electron desktop app (cross-platform)
+
+tests/
+├── unit/                   # Node.js test runner (1,574 test files)
+├── integration/            # Integration tests
+├── e2e/                    # Playwright tests
+├── security/               # Security tests
+├── translator/             # Translator-specific tests
+└── load/                   # Load tests
+
+docs/
+├── adr/                     # Architecture Decision Records
+├── architecture/            # System architecture & resilience
+├── comparison/              # OmniRoute vs alternatives
+├── compression/             # Compression guides & rules
+├── dev/                     # Development guides
+├── diagrams/                # Architecture diagrams
+├── frameworks/              # MCP, A2A, OpenCode, Memory, Skills
+├── guides/                  # User guide, Docker, setup, troubleshooting
+├── i18n/                    # Internationalized README translations
+├── marketing/               # Marketing materials
+├── ops/                     # Deployment, proxy, coverage, releases
+├── providers/               # Provider-specific docs
+├── reference/               # API reference, env vars, CLI tools, free tiers
+├── releases/                # Release notes
+├── routing/                 # Auto-combo engine, reasoning replay
+├── screenshots/             # Dashboard screenshots
+├── security/                # Guardrails, compliance, stealth, tokens
+└── specs/                   # Design specs
+```
+
+---
+
+## Adding a New Provider
+
+### Step 1: Register Provider Constants
+
+Add to `src/shared/constants/providers.ts` — Zod-validated at module load.
+
+### Step 2: Add Executor (if custom logic needed)
+
+Create executor in `open-sse/executors/your-provider.ts` extending the base executor.
+
+### Step 3: Add Translator (if non-OpenAI format)
+
+Create request/response translators in `open-sse/translator/`.
+
+### Step 4: Add OAuth Config (if OAuth-based)
+
+Add OAuth credentials in `src/lib/oauth/constants/oauth.ts` and service in `src/lib/oauth/services/`.
+
+If the upstream provider distributes a public OAuth client_id/secret or Firebase Web API key inside its public CLI / browser bundle, **do not** embed it as a string literal. Use `resolvePublicCred()` from `open-sse/utils/publicCreds.ts` and add a masked byte entry to `EMBEDDED_DEFAULTS`. The full mandatory workflow is documented in [`docs/security/PUBLIC_CREDS.md`](./docs/security/PUBLIC_CREDS.md).
+
+Inside handlers/executors, error messages reaching the client must go through `buildErrorBody()` / `sanitizeErrorMessage()` from `open-sse/utils/error.ts` — never put raw `err.stack` or `err.message` in a Response body. See [`docs/security/ERROR_SANITIZATION.md`](./docs/security/ERROR_SANITIZATION.md).
+
+### Step 5: Register Models
+
+Add model definitions in `open-sse/config/providerRegistry.ts`.
+
+### Step 6: Add Tests
+
+Write unit tests in `tests/unit/` covering at minimum:
+
+- Provider registration
+- Request/response translation
+- Error handling
+
+---
+
+## Pull Request Checklist
+
+- [ ] Tests pass (`npm test`)
+- [ ] Linting passes (`npm run lint`)
+- [ ] Build succeeds (`npm run build`)
+- [ ] TypeScript types added for new public functions and interfaces
+- [ ] No hardcoded secrets or fallback values
+- [ ] Public upstream credentials embedded via `resolvePublicCred()` (see [`docs/security/PUBLIC_CREDS.md`](./docs/security/PUBLIC_CREDS.md)), never as literals
+- [ ] Error responses route through `buildErrorBody()` / `sanitizeErrorMessage()` — no raw stack traces in response bodies (see [`docs/security/ERROR_SANITIZATION.md`](./docs/security/ERROR_SANITIZATION.md))
+- [ ] Shell commands (`exec` / `spawn`) pass runtime values via `env`, not via string interpolation
+- [ ] All inputs validated with Zod schemas
+- [ ] Changelog **fragment** added under `changelog.d/{features|fixes|maintenance}/<PR>-<slug>.md` for user-facing changes (see [`changelog.d/README.md`](./changelog.d/README.md)) — do **not** edit `CHANGELOG.md` directly; fragments are aggregated at release time and never conflict between PRs
+- [ ] Documentation updated (if applicable)
+- [ ] No new CodeQL / Secret-Scanning alerts opened, or each one dismissed with technical justification referencing the relevant `docs/security/` doc
+- [ ] Routes that spawn child processes (`/api/mcp/`, `/api/cli-tools/runtime/`) classified as `isLocalOnlyPath()` in `src/server/authz/routeGuard.ts` — see [Hard Rule #15](docs/security/ROUTE_GUARD_TIERS.md)
+- [ ] No AI/bot `Co-authored-by` trailers in commit messages (Hard Rule #16) — human collaborators whose work is reused are credited with standard `Co-authored-by: Name <email>` trailers
+
+---
+
+## Releasing
+
+Releases are managed via the `/generate-release` workflow. When a new GitHub Release is created, the package is **automatically published to npm** via GitHub Actions.
+
+For VPS deploys, use `npm run build:release` (not `npm run build`) — it performs a clean
+rebuild, assembles the bundle into `dist/`, and writes the `dist/BUILD_SHA` sentinel.
+Then use the `/deploy-vps-*-cc` skills which rsync `dist/` to the remote `app/` directory.
+
+---
 
 ## Getting Help
-- **Discord**: Join the [Graphify Discord](https://discord.gg/graphify) for questions and discussion.
-- **Issues**: Search [existing issues](https://github.com/Graphify-Labs/graphify/issues) before opening a new one.
-- **Discussions**: Use GitHub issues for bugs and feature requests, Discord for open-ended questions.
 
-## Further Reading
-- [README.md](README.md)
-- [ARCHITECTURE.md](ARCHITECTURE.md)
-- [SECURITY.md](SECURITY.md)
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- [RELEASING.md](RELEASING.md) (maintainers)
+- **Architecture**: See [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md)
+- **API Reference**: See [`docs/reference/API_REFERENCE.md`](docs/reference/API_REFERENCE.md)
+- **Security docs**: [`docs/security/CLI_TOKEN.md`](docs/security/CLI_TOKEN.md), [`docs/security/ROUTE_GUARD_TIERS.md`](docs/security/ROUTE_GUARD_TIERS.md), [`docs/security/ERROR_SANITIZATION.md`](docs/security/ERROR_SANITIZATION.md), [`docs/security/PUBLIC_CREDS.md`](docs/security/PUBLIC_CREDS.md)
+- **Ops docs**: [`docs/ops/SQLITE_RUNTIME.md`](docs/ops/SQLITE_RUNTIME.md)
+- **Issues**: [github.com/diegosouzapw/OmniRoute/issues](https://github.com/diegosouzapw/OmniRoute/issues)
